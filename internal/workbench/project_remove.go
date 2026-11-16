@@ -29,6 +29,10 @@ func (s *Server) removeProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "环境正在处理其他操作，请稍后重试", http.StatusConflict)
 		return
 	}
+	if s.usesVirtiofs() && (ready || s.vmRunning()) {
+		http.Error(w, errFixedSharing.Error(), http.StatusConflict)
+		return
+	}
 	path := input.Workspace
 	if path == "" || isClientMountPath(path) {
 		http.Error(w, "请选择已添加的项目；客户端共享请使用停止共享。", http.StatusBadRequest)

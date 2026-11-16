@@ -1,0 +1,135 @@
+diff --git a/pkg/driver/qemu/qemu.go b/pkg/driver/qemu/qemu.go
+index 425c196..78f57f1 100644
+--- a/pkg/driver/qemu/qemu.go
++++ b/pkg/driver/qemu/qemu.go
+@@ -551,7 +551,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
+ 
+ 	if *y.MountType == limatype.VIRTIOFS {
+ 		args = appendArgsIfNoConflict(args, "-object",
+-			fmt.Sprintf("memory-backend-file,id=virtiofs-shm,size=%s,mem-path=/dev/shm,share=on", strconv.Itoa(int(memBytes))))
++			fmt.Sprintf("memory-backend-memfd,id=virtiofs-shm,size=%s,share=on", strconv.Itoa(int(memBytes))))
+ 		args = appendArgsIfNoConflict(args, "-numa", "node,memdev=virtiofs-shm")
+ 	}
+ 
+@@ -1094,6 +1094,11 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
+ }
+ 
+ func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {
++	for _, helper := range []string{"newuidmap", "newgidmap"} {
++		if _, err := exec.LookPath(helper); err != nil {
++			return "", fmt.Errorf("virtiofs requires %s; install the virtiofsd and uidmap packages: %w", helper, err)
++		}
++	}
+ 	type vhostUserBackend struct {
+ 		BackendType string `json:"type"`
+ 		Binary      string `json:"binary"`
+@@ -1164,7 +1169,7 @@ func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {
+ 		}
+ 	}
+ 
+-	return "", errors.New("failed to locate virtiofsd")
++	return "", errors.New("failed to locate Rust virtiofsd; install the virtiofsd and uidmap packages")
+ }
+ 
+ func VirtiofsdCmdline(cfg Config, mountIndex int) ([]string, error) {
+@@ -1176,9 +1181,22 @@ func VirtiofsdCmdline(cfg Config, mountIndex int) ([]string, error) {
+ 		logrus.Warnf("Failed to remove old vhost socket: %v", err)
+ 	}
+ 
++	if cfg.LimaYAML.User.UID == nil || os.Getuid() <= 0 || os.Getgid() < 0 {
++		return nil, errors.New("virtiofs requires an unprivileged host user and a guest UID")
++	}
++	if mount.Writable == nil || !*mount.Writable || len(mount.SSHFS.ReadonlyNames) != 0 {
++		return nil, errors.New("virtiofs does not support readonly shares or protected names")
++	}
++	// Never run privileged or silently disable the namespace sandbox. Map only
++	// the invoking user's identity; guest root receives no host root mapping.
++	uid := *cfg.LimaYAML.User.UID
+ 	return []string{
+ 		"--socket-path", vhostSock,
+ 		"--shared-dir", mount.Location,
++		"--sandbox", "namespace", "--cache", "auto",
++		"--inode-file-handles=never",
++		fmt.Sprintf("--uid-map=:%d:%d:1:", uid, os.Getuid()),
++		fmt.Sprintf("--gid-map=:%d:%d:1:", uid, os.Getgid()),
+ 	}, nil
+ }
+ 
+diff --git a/pkg/driver/qemu/qemu_driver.go b/pkg/driver/qemu/qemu_driver.go
+index d246756..2092899 100644
+--- a/pkg/driver/qemu/qemu_driver.go
++++ b/pkg/driver/qemu/qemu_driver.go
+@@ -472,6 +472,17 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
+ 	}
+ 
+ 	var vhostCmds []*exec.Cmd
++	// A later daemon, socket or QEMU failure must release every daemon already
++	// started by this attempt. Successful launches hand ownership to the driver.
++	defer func() {
++		if l.qCmd == nil {
++			for _, cmd := range vhostCmds {
++				if cmd.Process != nil {
++					_ = cmd.Process.Kill()
++				}
++			}
++		}
++	}()
+ 	if *l.Instance.Config.MountType == limatype.VIRTIOFS {
+ 		vhostExe, err := FindVirtiofsd(ctx, qExe)
+ 		if err != nil {
+@@ -531,7 +542,7 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
+ 			return nil, err
+ 		}
+ 
+-		vhostWaitCh := make(chan error)
++		vhostWaitCh := make(chan error, 1)
+ 		go func() {
+ 			vhostWaitCh <- vhostCmd.Wait()
+ 		}()
+diff --git a/pkg/driver/qemu/virtiofs_cage_test.go b/pkg/driver/qemu/virtiofs_cage_test.go
+new file mode 100644
+index 0000000..2764a90
+--- /dev/null
++++ b/pkg/driver/qemu/virtiofs_cage_test.go
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: Apache-2.0
++package qemu
++
++import (
++	"os"
++	"runtime"
++	"slices"
++	"strings"
++	"testing"
++
++	"github.com/lima-vm/lima/v2/pkg/limatype"
++)
++
++func TestVirtiofsUsesNamespaceSandboxAndSingleIdentity(t *testing.T) {
++	if runtime.GOOS != "linux" || os.Getuid() == 0 {
++		t.Skip("unprivileged Linux host")
++	}
++	cfg := Config{InstanceDir: t.TempDir(), LimaYAML: &limatype.LimaYAML{User: limatype.User{UID: new(uint32(1234))}, Mounts: []limatype.Mount{{Location: t.TempDir(), Writable: new(true)}}}}
++	args, err := VirtiofsdCmdline(cfg, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	joined := strings.Join(args, " ")
++	for _, expected := range []string{"--sandbox namespace", "--cache auto", "--uid-map=:1234:", "--gid-map=:1234:"} {
++		if !strings.Contains(joined, expected) {
++			t.Fatal(args)
++		}
++	}
++	if slices.Contains(args, "--writeback") || slices.Contains(args, "none") {
++		t.Fatal("unsafe caching or sandbox", args)
++	}
++	cfg.LimaYAML.Mounts[0].Writable = new(false)
++	if _, err := VirtiofsdCmdline(cfg, 0); err == nil {
++		t.Fatal("readonly export accepted without host enforcement")
++	}
++	cfg.LimaYAML.Mounts[0].Writable = new(true)
++	cfg.LimaYAML.Mounts[0].SSHFS.ReadonlyNames = []string{".git"}
++	if _, err := VirtiofsdCmdline(cfg, 0); err == nil {
++		t.Fatal("protected names silently discarded")
++	}
++}

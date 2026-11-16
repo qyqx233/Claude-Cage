@@ -752,6 +752,8 @@ func (s *Server) proposed(w http.ResponseWriter, r *http.Request) (savedProfile,
 	input.MobileRelay = s.preferences.MobileRelay
 	input.BalancedDisplay = s.preferences.BalancedDisplay
 	input.ProjectFileCache = s.preferences.ProjectFileCache
+	input.ProjectShareType = s.preferences.ProjectShareType
+	input.ProjectSharePaths = append([]string(nil), s.preferences.ProjectSharePaths...)
 	input.Clock12Hour = s.preferences.Clock12Hour
 	input.BrowserHomeURL = browserHomeURL(s.preferences)
 	s.mu.Unlock()

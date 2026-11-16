@@ -22,16 +22,18 @@ import (
 )
 
 type Preferences struct {
-	BalancedDisplay       bool   `json:"balanced_display"`
-	ProjectFileCache      bool   `json:"project_file_cache"`
-	MobileRelay           string `json:"mobile_relay,omitempty"`
-	Workspace             string `json:"workspace"`
-	BrowserHomeURL        string `json:"browser_home_url"`
-	ClaudeTerminalCommand string `json:"claude_terminal_command"`
-	Keyboard              string `json:"keyboard"`
-	Clock12Hour           bool   `json:"clock_12_hour"`
-	AutoTimezone          bool   `json:"auto_timezone"`
-	AutoLanguage          bool   `json:"auto_language"`
+	ProjectShareType      string   `json:"project_share_type"`
+	ProjectSharePaths     []string `json:"project_share_paths"`
+	BalancedDisplay       bool     `json:"balanced_display"`
+	ProjectFileCache      bool     `json:"project_file_cache"`
+	MobileRelay           string   `json:"mobile_relay,omitempty"`
+	Workspace             string   `json:"workspace"`
+	BrowserHomeURL        string   `json:"browser_home_url"`
+	ClaudeTerminalCommand string   `json:"claude_terminal_command"`
+	Keyboard              string   `json:"keyboard"`
+	Clock12Hour           bool     `json:"clock_12_hour"`
+	AutoTimezone          bool     `json:"auto_timezone"`
+	AutoLanguage          bool     `json:"auto_language"`
 }
 
 const defaultBrowserHomeURL = "https://www.bing.com/"
@@ -167,6 +169,9 @@ func writePrivate(path string, v any) error {
 	return os.Rename(f.Name(), path)
 }
 func settingsView(c cage.Config, p Preferences) Settings {
+	if p.ProjectShareType == "" {
+		p.ProjectShareType = "sshfs"
+	}
 	if p.MobileRelay == mobilelink.OfficialRelay {
 		p.MobileRelay = ""
 	}
@@ -186,6 +191,18 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 		return c, input.Preferences, errors.New("请选择 Mac 或原生 Linux 按键习惯")
 	}
 	p := input.Preferences
+	sharing, err := cage.NormalizeProjectSharing(cage.ProjectSharing{Type: p.ProjectShareType, Paths: p.ProjectSharePaths}, profile)
+	if err != nil {
+		return c, p, err
+	}
+	p.ProjectShareType, p.ProjectSharePaths = sharing.Type, sharing.Paths
+	if sharing.Virtiofs() {
+		for _, path := range sharing.Paths {
+			if _, err := validateWorkspace(path, profile); err != nil {
+				return c, p, err
+			}
+		}
+	}
 	p.MobileRelay = strings.TrimSuffix(strings.TrimSpace(p.MobileRelay), "/")
 	if p.MobileRelay != "" && (!strings.HasPrefix(p.MobileRelay, "https://") || !mobilelink.ValidRelayOrigin(p.MobileRelay)) {
 		return c, p, errors.New("中继地址须为 HTTPS 地址，只包含主机和可选端口")
@@ -205,6 +222,15 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 			return c, p, err
 		}
 		p.Workspace = workspace
+		if sharing.Virtiofs() {
+			covered := false
+			for _, root := range sharing.Paths {
+				covered = covered || cage.StorageContains(root, workspace)
+			}
+			if !covered {
+				p.Workspace = sharing.Paths[0]
+			}
+		}
 	}
 	return c, p, nil
 }

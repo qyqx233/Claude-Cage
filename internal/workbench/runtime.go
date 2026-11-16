@@ -275,6 +275,12 @@ func (s *Server) runCage(args ...string) error {
 		if err := s.requireCurrentLinuxTransferMount(); err != nil {
 			return err
 		}
+		s.mu.Lock()
+		sharingPrefs := s.preferences
+		s.mu.Unlock()
+		if err := s.validateVirtiofsSettings(sharingPrefs); err != nil {
+			return err
+		}
 	}
 	ctx := s.operationContext()
 	// Setup and startup can both install dependencies. Downloads own their
@@ -573,7 +579,14 @@ func (s *Server) apply(v savedProfile, validate bool) error {
 	} else if s.macosGuest != nil {
 		wasReady = macOSInstanceRunning(s.instanceDir(), s.macosGuest.Backend)
 	}
+	sharingLocked := wasReady || s.ready
 	s.mu.Unlock()
+	if err := s.validateVirtiofsSettings(v.Preferences); err != nil {
+		return err
+	}
+	if sharingLocked && !sameProjectSharing(oldPrefs, v.Preferences) {
+		return errFixedSharing
+	}
 	changed := old != v.Config || oldPrefs.AutoTimezone != v.Preferences.AutoTimezone || oldPrefs.AutoLanguage != v.Preferences.AutoLanguage
 	if changed && validate && old.RequireManagedProxy(s.profile) == nil {
 		s.setMessage("正在验证新出口，现有环境保持运行…")

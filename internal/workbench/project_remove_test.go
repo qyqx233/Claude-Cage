@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -71,12 +72,12 @@ func TestProjectRemovalPersistsRevocationAcrossGuests(t *testing.T) {
 				t.Fatal("unrelated project was changed")
 			}
 			before.Workspace = other
-			if s.preferences != before {
+			if !reflect.DeepEqual(s.preferences, before) {
 				t.Fatal("preferences changed beyond current project")
 			}
 			saved, err := os.ReadFile(filepath.Join(s.profile, "workbench.json"))
 			var prefs Preferences
-			if err != nil || json.Unmarshal(saved, &prefs) != nil || prefs != before {
+			if err != nil || json.Unmarshal(saved, &prefs) != nil || !reflect.DeepEqual(prefs, before) {
 				t.Fatal("current project was not persisted", err)
 			}
 			reloaded := &Server{profile: s.profile, preferences: prefs}

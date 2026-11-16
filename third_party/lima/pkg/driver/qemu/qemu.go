@@ -551,7 +551,7 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 
 	if *y.MountType == limatype.VIRTIOFS {
 		args = appendArgsIfNoConflict(args, "-object",
-			fmt.Sprintf("memory-backend-file,id=virtiofs-shm,size=%s,mem-path=/dev/shm,share=on", strconv.Itoa(int(memBytes))))
+			fmt.Sprintf("memory-backend-memfd,id=virtiofs-shm,size=%s,share=on", strconv.Itoa(int(memBytes))))
 		args = appendArgsIfNoConflict(args, "-numa", "node,memdev=virtiofs-shm")
 	}
 
@@ -1094,6 +1094,11 @@ func cmdline(ctx context.Context, cfg Config, workingDir *string) (exe string, a
 }
 
 func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {
+	for _, helper := range []string{"newuidmap", "newgidmap"} {
+		if _, err := exec.LookPath(helper); err != nil {
+			return "", fmt.Errorf("virtiofs requires %s; install the virtiofsd and uidmap packages: %w", helper, err)
+		}
+	}
 	type vhostUserBackend struct {
 		BackendType string `json:"type"`
 		Binary      string `json:"binary"`
@@ -1164,7 +1169,7 @@ func FindVirtiofsd(ctx context.Context, qemuExe string) (string, error) {
 		}
 	}
 
-	return "", errors.New("failed to locate virtiofsd")
+	return "", errors.New("failed to locate Rust virtiofsd; install the virtiofsd and uidmap packages")
 }
 
 func VirtiofsdCmdline(cfg Config, mountIndex int) ([]string, error) {
@@ -1176,9 +1181,22 @@ func VirtiofsdCmdline(cfg Config, mountIndex int) ([]string, error) {
 		logrus.Warnf("Failed to remove old vhost socket: %v", err)
 	}
 
+	if cfg.LimaYAML.User.UID == nil || os.Getuid() <= 0 || os.Getgid() < 0 {
+		return nil, errors.New("virtiofs requires an unprivileged host user and a guest UID")
+	}
+	if mount.Writable == nil || !*mount.Writable || len(mount.SSHFS.ReadonlyNames) != 0 {
+		return nil, errors.New("virtiofs does not support readonly shares or protected names")
+	}
+	// Never run privileged or silently disable the namespace sandbox. Map only
+	// the invoking user's identity; guest root receives no host root mapping.
+	uid := *cfg.LimaYAML.User.UID
 	return []string{
 		"--socket-path", vhostSock,
 		"--shared-dir", mount.Location,
+		"--sandbox", "namespace", "--cache", "auto",
+		"--inode-file-handles=never",
+		fmt.Sprintf("--uid-map=:%d:%d:1:", uid, os.Getuid()),
+		fmt.Sprintf("--gid-map=:%d:%d:1:", uid, os.Getgid()),
 	}, nil
 }
 

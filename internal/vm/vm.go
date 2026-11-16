@@ -79,6 +79,8 @@ type SSHFS = spec.SSHFS
 // which is where readonlyNames are enforced.
 const ReverseSSHFS = "reverse-sshfs"
 
+const Virtiofs = "virtiofs"
+
 // Settings change a VM. A zero field is left as it is.
 type Settings struct {
 	CPUs         int

@@ -61,7 +61,14 @@ func (s *start) shares(writable bool) ([]vm.Mount, []mounts.FileMount) {
 	if !s.protect {
 		n = []string{}
 	}
-	key := fmt.Sprint(writable, n)
+	key := fmt.Sprint(writable, n, s.fixedShares)
+	if s.fixedShares != nil {
+		out := []vm.Mount{{Location: s.dir, MountPoint: paths.Guest(s.dir), Writable: true}}
+		for _, path := range s.fixedShares {
+			out = append(out, vm.Mount{Location: path, MountPoint: paths.Guest(path), Writable: true})
+		}
+		return out, nil
+	}
 	if s.built != nil && s.builtKey == key {
 		return s.built, s.builtFiles
 	}
@@ -81,7 +88,7 @@ func (s *start) applyShares(writable bool) error {
 		return err
 	}
 	ms, files := s.shares(writable)
-	mt := vm.ReverseSSHFS
+	mt := s.shareMountType()
 	if err := b.Edit(s.ctx, s.name, vm.Settings{Mounts: &ms, MountType: &mt}); err != nil {
 		s.warnf("Error: could not set the shares of VM '%s':\n%v", s.name, err)
 		return errStop
@@ -244,7 +251,7 @@ func unprotected(inst *vm.Instance, names []string) string {
 		names = mounts.BaseNames
 	}
 	for _, m := range inst.Mounts {
-		if slices.ContainsFunc(names, func(n string) bool { return !slices.Contains(m.SSHFS.ReadonlyNames, n) }) {
+		if slices.ContainsFunc(names, func(n string) bool { return m.SSHFS == nil || !slices.Contains(m.SSHFS.ReadonlyNames, n) }) {
 			return "the share of " + m.Location + " lacks the read-only names"
 		}
 	}
@@ -266,7 +273,11 @@ func notReadOnly(inst *vm.Instance) string {
 
 // sharesDiffer reports whether inst's shares differ from want, Lima's
 // defaults (sshfs's cache on, no SFTP driver named) filled in on both.
-func sharesDiffer(inst *vm.Instance, want []vm.Mount) bool {
+func sharesDiffer(inst *vm.Instance, want []vm.Mount, mountType ...string) bool {
+	wantType := vm.ReverseSSHFS
+	if len(mountType) != 0 {
+		wantType = mountType[0]
+	}
 	if len(inst.Mounts) == 0 && len(want) == 0 {
 		return false
 	}
@@ -289,7 +300,7 @@ func sharesDiffer(inst *vm.Instance, want []vm.Mount) bool {
 		}
 		return out
 	}
-	return !reflect.DeepEqual(norm(inst.Mounts), norm(want)) || inst.MountType != vm.ReverseSSHFS
+	return !reflect.DeepEqual(norm(inst.Mounts), norm(want)) || inst.MountType != wantType
 }
 
 // allReadOnly reports whether every share of inst is read-only.
@@ -320,6 +331,10 @@ func (s *start) ensureRunning() error {
 }
 
 func (s *start) ensureRunningLocked() error {
+	if err := s.prepareFixedShares(); err != nil {
+		s.warnf("Error: %v", err)
+		return errStop
+	}
 	o := &s.opts
 	if o.Scratch && (o.Reset || o.ReadOnly) {
 		s.warnf("Error: --scratch makes a new VM that shares nothing: --reset and --readonly do not go with it.")
@@ -539,7 +554,11 @@ func (s *start) ensureRunningLocked() error {
 	wasProtected := len(inst.Mounts) > 0 && unprotected(inst, nil) == ""
 	gitStale := !o.Scratch && wasProtected != s.protect
 	namesStale := s.protect && wasProtected && unprotected(inst, s.names) != ""
-	stale := sharesDiffer(inst, want)
+	stale := sharesDiffer(inst, want, s.shareMountType())
+	if stale && wasRunning && (s.shareMountType() == vm.Virtiofs || inst.MountType == vm.Virtiofs) {
+		s.warnf("virtiofs 共享配置发生变化。请先保存工作，停止环境后重新启动。")
+		return errStop
+	}
 	if !o.ReadOnly && wasRunning && s.protect && (gitStale || namesStale) {
 		if gitStale {
 			s.warnf("Warning: VM '%s' is running with .git writable, so the agent can still write .git.", s.name)

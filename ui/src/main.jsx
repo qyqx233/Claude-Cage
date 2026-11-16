@@ -296,7 +296,7 @@ function App() {
           : "已停止";
   const notify = (text) => setToast(text);
   // A Linux environment keeps what it learned about project files for a while.
-  const projectFilesCached = settings?.project_file_cache === true &&
+  const projectFilesCached = settings?.project_share_type !== "virtiofs" && settings?.project_file_cache === true &&
     !/^(windows|macos)/.test(account?.guest_system || status?.guest_system || "");
   const refreshProjectFiles = async () => {
     setProjectRefreshing(true);

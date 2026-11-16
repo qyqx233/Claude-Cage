@@ -123,10 +123,29 @@ func (l *Lima) prepare() (*limaembed.Share, error) {
 	return l.share, nil
 }
 
-// Confined fails unless every share of inst is served by the builtin SFTP
-// server, over reverse-sshfs: the one server confined to its folder. No
-// other way into the host is started.
+// Confined accepts rooted builtin SFTP or unprivileged Linux QEMU virtiofs.
+// The latter is launched with an enforced namespace sandbox, cannot enforce
+// readonly names, and must additionally match Cage grants before Start.
 func Confined(inst *Instance) error {
+	if inst.MountType == Virtiofs {
+		if runtime.GOOS != "linux" || inst.VMType != "qemu" || os.Getuid() == 0 {
+			return fmt.Errorf("%w: virtiofs requires an unprivileged Linux QEMU host", ErrUnconfined)
+		}
+		for _, m := range inst.Mounts {
+			if !m.Writable || m.SSHFS != nil && len(m.SSHFS.ReadonlyNames) != 0 {
+				return fmt.Errorf("%w: virtiofs cannot enforce readonly shares or names", ErrUnconfined)
+			}
+			if !filepath.IsAbs(m.Location) || filepath.Dir(m.Location) == m.Location || m.MountPoint != paths.Guest(m.Location) {
+				return fmt.Errorf("%w: invalid virtiofs directory", ErrUnconfined)
+			}
+			real, err := paths.Resolve(m.Location)
+			if err != nil || !paths.Equal(real, m.Location) {
+				return fmt.Errorf("%w: virtiofs directory changed", ErrUnconfined)
+			}
+		}
+		return nil
+	}
+
 	for _, m := range inst.Mounts {
 		if m.SSHFS == nil || m.SSHFS.SFTPDriver != "builtin" {
 			return fmt.Errorf("%w: the share of %s is not served by the builtin SFTP server", ErrUnconfined, m.Location)
@@ -627,6 +646,12 @@ func (l *Lima) Start(ctx context.Context, name string, log io.Writer) error {
 		return err
 	}
 	if inst, err = l.inspect(ctx, name); err != nil {
+		return err
+	}
+	if *inst.Config.MountType == Virtiofs && *inst.Config.OS != limatype.LINUX {
+		return fmt.Errorf("%w: virtiofs requires a Linux guest", ErrUnconfined)
+	}
+	if err := cageVirtiofsGrants(fromLima(inst)); err != nil {
 		return err
 	}
 	if err := Confined(fromLima(inst)); err != nil {

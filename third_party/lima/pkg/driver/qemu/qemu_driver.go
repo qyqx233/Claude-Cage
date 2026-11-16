@@ -472,6 +472,17 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 	}
 
 	var vhostCmds []*exec.Cmd
+	// A later daemon, socket or QEMU failure must release every daemon already
+	// started by this attempt. Successful launches hand ownership to the driver.
+	defer func() {
+		if l.qCmd == nil {
+			for _, cmd := range vhostCmds {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			}
+		}
+	}()
 	if *l.Instance.Config.MountType == limatype.VIRTIOFS {
 		vhostExe, err := FindVirtiofsd(ctx, qExe)
 		if err != nil {
@@ -531,7 +542,7 @@ func (l *LimaQemuDriver) Start(ctx context.Context) (chan error, error) {
 			return nil, err
 		}
 
-		vhostWaitCh := make(chan error)
+		vhostWaitCh := make(chan error, 1)
 		go func() {
 			vhostWaitCh <- vhostCmd.Wait()
 		}()

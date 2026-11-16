@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/lima-vm/sshocker/pkg/reversesshfs"
+	"github.com/sylvinus/agent-vm/internal/cage"
 )
 
 // connectProject is the shared project entry point. Callers hold the lifecycle
@@ -213,6 +215,9 @@ func (s *Server) ensureProjectShare(path string) (returned error) {
 	if path == s.environmentDir() {
 		return nil
 	}
+	if s.usesVirtiofs() {
+		return s.ensureVirtiofsProjectShare(path)
+	}
 
 	s.mu.Lock()
 	current := s.projectShares[path]
@@ -305,6 +310,10 @@ func projectShareOptions(cache bool) string {
 // files, so that changes made on the host are visible at once. A file some
 // process holds open keeps its cached attributes until they expire.
 func (s *Server) refreshProjectFiles(w http.ResponseWriter, r *http.Request) {
+	if s.usesVirtiofs() {
+		http.Error(w, "virtiofs 使用独立的缓存策略，无需刷新 SSHFS 文件缓存", 409)
+		return
+	}
 	if s.windowsGuest != nil || s.macosGuest != nil {
 		http.Error(w, "此环境的项目文件始终直接读取，无需刷新", 409)
 		return
@@ -380,6 +389,9 @@ func (s *Server) projectPaths() ([]string, error) {
 	paths := []string{}
 	s.mu.Lock()
 	current := s.preferences.Workspace
+	if s.preferences.sharing().Virtiofs() {
+		saved.Paths = append(saved.Paths, s.preferences.ProjectSharePaths...)
+	}
 	s.mu.Unlock()
 	for _, path := range append(saved.Paths, current) {
 		found := path == ""
@@ -407,6 +419,20 @@ func (s *Server) projectWorkspace(path string) (string, error) {
 	for _, authorized := range paths {
 		if path == authorized {
 			return validateWorkspace(path, s.profile)
+		}
+	}
+	s.mu.Lock()
+	sharing := s.preferences.sharing()
+	s.mu.Unlock()
+	if sharing.Virtiofs() {
+		canonical, err := validateWorkspace(path, s.profile)
+		if err != nil {
+			return "", err
+		}
+		for _, root := range sharing.Paths {
+			if cage.StorageContains(root, canonical) {
+				return canonical, nil
+			}
 		}
 	}
 	return "", errors.New("请先通过打开项目添加该文件夹")
@@ -446,6 +472,15 @@ func (s *Server) restoreProjectShares() {
 			saved.Paths = append(saved.Paths, current)
 		}
 	}
+	s.mu.Lock()
+	if s.preferences.sharing().Virtiofs() {
+		for _, path := range s.preferences.ProjectSharePaths {
+			if !slices.Contains(saved.Paths, path) {
+				saved.Paths = append(saved.Paths, path)
+			}
+		}
+	}
+	s.mu.Unlock()
 	var failures []projectShareError
 	for _, path := range saved.Paths {
 		if err := s.ensureProjectShare(path); err != nil {

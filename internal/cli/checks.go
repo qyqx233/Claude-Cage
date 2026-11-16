@@ -145,11 +145,12 @@ type start struct {
 	name string // the VM
 	dir  string // the project, as the shell spells it
 
-	created bool     // this run made the VM, and it is still there
-	vmUp    bool     // running when the start began, and not reset
-	protect bool     // every .git read-only
-	names   []string // the read-only names, when protect
-	notes   string   // hooks notes, printed once the names apply
+	fixedShares []string // cold-start Cage virtiofs grants; nil means SSHFS
+	created     bool     // this run made the VM, and it is still there
+	vmUp        bool     // running when the start began, and not reset
+	protect     bool     // every .git read-only
+	names       []string // the read-only names, when protect
+	notes       string   // hooks notes, printed once the names apply
 
 	built      []vm.Mount // see shares
 	builtFiles []mounts.FileMount

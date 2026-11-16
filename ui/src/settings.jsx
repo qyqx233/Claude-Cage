@@ -526,7 +526,22 @@ export function SettingsPanel({
                   <input type="checkbox" role="switch" checked={draft.balanced_display}
                     onChange={(event) => update("balanced_display", event.target.checked)} />
                 </label>}
-                {typeof current.project_file_cache === "boolean" && linuxGuest && <label className="toggle-row">
+                {linuxGuest && typeof current.project_share_type === "string" && <>
+                  <label>项目共享方式
+                    <InlineSelect inline aria-label="项目共享方式" value={draft.project_share_type || "sshfs"}
+                      onValueChange={(next) => update("project_share_type", next)}>
+                      <option value="sshfs">SSHFS</option>
+                      <option value="virtiofs">virtiofs（Linux 主机）</option>
+                    </InlineSelect>
+                  </label>
+                  {draft.project_share_type === "virtiofs" && <label>固定共享目录（每行一个绝对路径）
+                    <textarea aria-label="固定共享目录" rows={5}
+                      value={(draft.project_share_paths ?? []).join("\n")}
+                      onChange={(event) => update("project_share_paths", event.target.value.split("\n"))} />
+                  </label>}
+                  <p className="field-help">请先停止环境再修改共享方式和固定目录。virtiofs 需要主机安装 virtiofsd；已共享目录内的项目可以自由切换，运行中新增或移除共享范围暂不支持。</p>
+                </>}
+                {typeof current.project_file_cache === "boolean" && linuxGuest && draft.project_share_type !== "virtiofs" && <label className="toggle-row">
                   <span>
                     <strong>项目文件缓存</strong>
                     <small>减少读取项目文件时与本机的往返。在本机上所做的改动最多 20 秒后在环境中可见，也可以在项目栏点“刷新项目文件”立即同步。下次启动环境时生效。</small>

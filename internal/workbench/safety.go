@@ -566,6 +566,10 @@ func (s *Server) inspectVMLayout() (bool, bool) {
 		m := spec.Mounts[0]
 		shares = paths.Equal(paths.Host(m.Location), paths.Host(workspace)) && m.MountPoint == guestPath(workspace) && m.Writable && m.SSHFS.Driver == "builtin"
 	}
+	if spec.MountType == "virtiofs" {
+		var layout fixedShareLayout
+		shares = yaml.Unmarshal(data, &layout) == nil && s.fixedLayoutMatches(layout)
+	}
 	return shares, len(spec.Networks) == 0
 }
 

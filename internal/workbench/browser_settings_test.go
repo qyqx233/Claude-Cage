@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -55,7 +56,7 @@ func TestBrowserPreferencesPatchAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	response = request(s, "POST", "/api/browser/preferences", s.origin, `{"browser_home_url":"https://example.test/rejected"}`, true)
-	if response.Code == 200 || s.preferences != before {
+	if response.Code == 200 || !reflect.DeepEqual(s.preferences, before) {
 		t.Fatal("failed write committed preferences")
 	}
 	if strings.Join(homes, ",") != "https://example.test/new,https://example.test/rejected,https://example.test/new" {

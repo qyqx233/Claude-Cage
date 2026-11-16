@@ -280,6 +280,8 @@ func (d *doctor) directory(ctx context.Context, dir string, protects bool, getVM
 		}
 		confined := vm.Confined(inst)
 		switch {
+		case inst.Status == vm.Running && confined == nil && inst.MountType == vm.Virtiofs:
+			d.line("ok", "running; virtiofs exports use a host namespace sandbox (readonly mode unsupported)")
 		case inst.Status == vm.Running && confined == nil:
 			d.line("ok", "running; the project share is enforced on the host (--readonly works)")
 		case inst.Status == vm.Running:

@@ -110,6 +110,10 @@ func (s *Server) projectAdditionalDirectories(workspace string) ([]string, error
 // Saving and opening share the macOS approval flow. Approval never persists a
 // partial group; the caller retries the complete request after GUI approval.
 func (s *Server) projectConnectionError(w http.ResponseWriter, err error, folder string) {
+	if errors.Is(err, errFixedSharing) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	if errors.Is(err, errMacOSProjectApproval) {
 		if canonical, pathErr := validateWorkspace(folder, s.profile); pathErr == nil {
 			folder = canonical

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -88,7 +89,7 @@ func TestProjectPickerWorkbenchActivationPreservesOtherPreferences(t *testing.T)
 		t.Fatal("activation was not persisted", err)
 	}
 	original.Workspace = root
-	if s.preferences != original || saved != original {
+	if !reflect.DeepEqual(s.preferences, original) || !reflect.DeepEqual(saved, original) {
 		t.Fatal("activation changed unrelated preferences", saved, s.preferences)
 	}
 }
