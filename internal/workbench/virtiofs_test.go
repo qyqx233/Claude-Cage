@@ -43,6 +43,15 @@ func TestVirtiofsLayoutRequiresExactlyConfiguredExports(t *testing.T) {
 		t.Fatal("fixed exports rejected", fs, net)
 	}
 	layout, _ := s.fixedShareLayout()
+	layout.VMType = ""
+	if !s.fixedLayoutMatches(layout) {
+		t.Fatal("legacy Lima config omitting the default QEMU driver rejected")
+	}
+	layout.VMType = "vz"
+	if s.fixedLayoutMatches(layout) {
+		t.Fatal("explicit non-QEMU driver accepted")
+	}
+	layout, _ = s.fixedShareLayout()
 	layout.Mounts = append(layout.Mounts, layout.Mounts[0])
 	if s.fixedLayoutMatches(layout) {
 		t.Fatal("extra export accepted")

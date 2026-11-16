@@ -77,7 +77,13 @@ func (s *Server) fixedLayoutMatches(layout fixedShareLayout) bool {
 	s.mu.Lock()
 	p := s.preferences.sharing()
 	s.mu.Unlock()
-	if !p.Virtiofs() || layout.Type != "virtiofs" || layout.VMType != "qemu" || s.validateVirtiofsSettings(Preferences{ProjectShareType: p.Type, ProjectSharePaths: p.Paths}) != nil {
+	driver := layout.VMType
+	// Lima fills in QEMU on Linux when older configuration files omit vmType.
+	// Match that effective driver without rewriting a running VM's config.
+	if driver == "" && runtime.GOOS == "linux" {
+		driver = "qemu"
+	}
+	if !p.Virtiofs() || layout.Type != "virtiofs" || driver != "qemu" || s.validateVirtiofsSettings(Preferences{ProjectShareType: p.Type, ProjectSharePaths: p.Paths}) != nil {
 		return false
 	}
 	expected := append([]string{s.environmentDir()}, p.Paths...)
