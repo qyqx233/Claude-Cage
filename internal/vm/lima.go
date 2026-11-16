@@ -648,7 +648,10 @@ func (l *Lima) Start(ctx context.Context, name string, log io.Writer) error {
 	if inst, err = l.inspect(ctx, name); err != nil {
 		return err
 	}
-	if *inst.Config.MountType == Virtiofs && *inst.Config.OS != limatype.LINUX {
+	if inst.Config == nil {
+		return fmt.Errorf("%w: invalid Lima configuration: %v", ErrUnconfined, errors.Join(inst.Errors...))
+	}
+	if inst.Config.MountType != nil && *inst.Config.MountType == Virtiofs && (inst.Config.OS == nil || *inst.Config.OS != limatype.LINUX) {
 		return fmt.Errorf("%w: virtiofs requires a Linux guest", ErrUnconfined)
 	}
 	if err := cageVirtiofsGrants(fromLima(inst)); err != nil {

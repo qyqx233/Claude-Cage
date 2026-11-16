@@ -103,6 +103,9 @@ func NormalizeProjectSharing(p ProjectSharing, profile string) (ProjectSharing, 
 	if len(normalized) == 0 || len(normalized) > 32 {
 		return p, errors.New("virtiofs 需要配置 1 至 32 个固定共享目录")
 	}
+	if err := validateVirtiofsFilesystems(append([]string{EnvironmentDir(profile)}, normalized...)); err != nil {
+		return p, err
+	}
 	p.Paths = normalized
 	return p, nil
 }
