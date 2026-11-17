@@ -559,14 +559,26 @@ func (s *Server) stopEnvironment() (returned error) {
 	s.mu.Unlock()
 	s.terminals.closeAll()
 	s.mobileCLI.stopAll()
-	s.closeProjectShares()
+	nfs, err := s.nativeNFS()
+	if err != nil {
+		return err
+	}
+	// A native NFS mount can be below a project FUSE mount. Keep that parent
+	// transport alive while the guest flushes and unmounts its filesystems.
+	if !nfs.Enabled() {
+		s.closeProjectShares()
+	}
 	if _, err := os.Stat(filepath.Join(s.instanceDir(), "lima.yaml")); !containerenv.Configured(s.profile) && os.IsNotExist(err) {
+		s.closeProjectShares()
 		return nil
 	}
 	// Internal restarts keep the already validated core alive. Explicit stop
 	// releases it above only after the environment has stopped successfully.
 	if err := s.runCage("stop", "--keep-proxy"); err != nil {
 		return err
+	}
+	if nfs.Enabled() {
+		s.closeProjectShares()
 	}
 	return nil
 }
