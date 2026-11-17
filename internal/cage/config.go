@@ -29,6 +29,7 @@ type Config struct {
 	Locale          string                `json:"locale"`
 	BrowserLanguage string                `json:"browser_language"`
 	ExitPolicy      ExitPolicy            `json:"exit_policy"`
+	NativeNFS       NativeNFS             `json:"native_nfs,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -60,6 +61,9 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if err := c.NativeNFS.Validate(); err != nil {
+		return err
+	}
 	u, err := url.Parse(c.ProxyURL)
 	if err != nil || u == nil {
 		return errors.New("invalid proxy URL")

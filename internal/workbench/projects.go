@@ -212,6 +212,21 @@ func (s *Server) ensureProjectShare(path string) (returned error) {
 	if s.macosGuest != nil {
 		return s.ensureMacOSProjectShare(path)
 	}
+	nfs, err := s.nativeNFS()
+	if err != nil {
+		return err
+	}
+	if nfs.Enabled() && cage.StorageContains(nfs.Target, path) {
+		return s.ensureNativeNFS(nfs)
+	}
+	nfsChild := nfs.Enabled() && cage.StorageContains(path, nfs.Target)
+	if nfsChild {
+		defer func() {
+			if returned == nil {
+				returned = s.ensureNativeNFS(nfs)
+			}
+		}()
+	}
 	if path == s.environmentDir() {
 		return nil
 	}
@@ -232,6 +247,11 @@ func (s *Server) ensureProjectShare(path string) (returned error) {
 	}
 	ctx, cancel := context.WithTimeout(s.operationContext(), 15*time.Second)
 	defer cancel()
+	if nfsChild {
+		if err := s.unmountNativeNFS(nfs); err != nil {
+			return errors.New("NAS 挂载仍在使用，不能替换其父目录共享")
+		}
+	}
 	quoted := shellescape.Quote(guestPath(path))
 	// Stale FUSE mounts can remain after a control-service restart. Only reconnect
 	// this explicitly authorized path, without changing other projects' mounts.

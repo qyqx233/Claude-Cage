@@ -218,6 +218,16 @@ func (s *Server) attach() error {
 	s.ready = true
 	s.mu.Unlock()
 	s.restoreProjectShares()
+	nfs, err := s.nativeNFS()
+	if err == nil {
+		err = s.ensureNativeNFS(nfs)
+	}
+	if err != nil {
+		s.mu.Lock()
+		s.ready = false
+		s.mu.Unlock()
+		return err
+	}
 	s.desktopViews.background(s.changeDesktopVisibility)
 	s.browserViews.background(s.changeBrowserVisibility)
 	return nil

@@ -126,7 +126,11 @@ func Run(args []string) bool {
 					usernet.DroppedIPv6 = gate.ObserveDroppedIPv6
 				}
 			}
-			usernet.Outbound, usernet.GuestDial = gate.Allows, gate.DialContext
+			storageNetwork, err := cage.WithNativeNFS(cfg.NativeNFS, gate)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+			usernet.Outbound, usernet.GuestDial = storageNetwork.Allows, storageNetwork.DialContext
 			usernet.DNSExchange, dns.Exchange = gate.ExchangeDNS, gate.ExchangeDNS
 		}
 		if err := cfg.RecordRunning(string(st), args[len(args)-1]); err != nil {
