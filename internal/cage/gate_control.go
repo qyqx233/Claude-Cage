@@ -118,10 +118,13 @@ func StartGateControl(configPath, instanceDir string, gate *EgressGate) (func(),
 				// Keep the wire/storage limit without splitting a UTF-8 character.
 				command.Reason = gateCloseReason(command.Reason)
 			}
-			if command.Action == "check" || command.Action == "grant" || command.Action == "renew" || command.Action == "proxy-revision" {
+			if command.Action == "check" || command.Action == "grant" || command.Action == "renew" || command.Action == "proxy-revision" || command.Action == "hold-proxy" {
 				cfg, e := Load(configPath)
 				if e == nil {
 					e = cfg.RequireManagedProxy(filepath.Dir(configPath))
+				}
+				if e == nil && command.Action == "hold-proxy" && cfg.Fingerprint() != gate.Status().Configuration {
+					e = errors.New("配置与运行环境不一致，请重新检测")
 				}
 				if e != nil {
 					gate.Close("代理节点未应用，外网保持关闭")
@@ -153,6 +156,8 @@ func StartGateControl(configPath, instanceDir string, gate *EgressGate) (func(),
 				}
 			case "renew":
 				operationError = gate.Renew(command.ReportID)
+			case "hold-proxy":
+				operationError = gate.HoldAfterProbeFailure(command.ReportID)
 			case "close":
 				gate.Close(command.Reason)
 			default:
@@ -273,6 +278,9 @@ func (c *GateClient) Grant(ctx context.Context, report SafetyReport) (GateStatus
 }
 func (c *GateClient) Renew(ctx context.Context, reportID string) (GateStatus, error) {
 	return c.request(ctx, &gateCommand{Action: "renew", ReportID: reportID})
+}
+func (c *GateClient) HoldAfterProbeFailure(ctx context.Context, reportID string) (GateStatus, error) {
+	return c.request(ctx, &gateCommand{Action: "hold-proxy", ReportID: reportID})
 }
 func gateCloseReason(reason string) string {
 	if len(reason) > 200 {

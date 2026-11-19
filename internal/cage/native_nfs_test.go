@@ -14,7 +14,7 @@ func TestNativeNFSScopeAndRevokedInternet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	network, err := WithNativeNFS(n, gate)
+	network, err := WithDirectNetwork(Config{NativeNFS: n}, gate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestNativeNFSScopeAndRevokedInternet(t *testing.T) {
 			t.Errorf("%s %s: %v", tc.network, tc.address, got)
 		}
 	}
-	transport := network.(*nfsNetwork)
+	transport := network.(*directNetwork)
 	calls := 0
 	transport.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
 		calls++
@@ -65,7 +65,7 @@ func TestNativeNFSScopeAndRevokedInternet(t *testing.T) {
 		{Server: n.Server, Export: "/data", Target: "/data/../root"},
 		{Server: n.Server, Export: "/data\n", Target: n.Target},
 	} {
-		if _, err := WithNativeNFS(invalid, gate); err == nil {
+		if _, err := WithDirectNetwork(Config{NativeNFS: invalid}, gate); err == nil {
 			t.Errorf("invalid grant accepted: %+v", invalid)
 		}
 	}

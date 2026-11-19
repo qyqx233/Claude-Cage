@@ -1,13 +1,10 @@
 package cage
 
 import (
-	"context"
 	"errors"
-	"net"
 	"net/netip"
 	"path"
 	"strings"
-	"time"
 )
 
 // NativeNFS is an explicit, cold-start grant to one NAS and one export. Its
@@ -47,38 +44,4 @@ func (n NativeNFS) Validate() error {
 
 func (n NativeNFS) Allows(network string, dst netip.AddrPort) bool {
 	return n.Enabled() && network == "tcp" && dst.IsValid() && dst.Addr().String() == n.Server && dst.Port() == 2049
-}
-
-type GuestNetwork interface {
-	Allows(string, netip.AddrPort) bool
-	DialContext(context.Context, string, string) (net.Conn, error)
-}
-
-type nfsNetwork struct {
-	native   NativeNFS
-	fallback GuestNetwork
-	dial     func(context.Context, string, string) (net.Conn, error)
-}
-
-func WithNativeNFS(n NativeNFS, fallback GuestNetwork) (GuestNetwork, error) {
-	if err := n.Validate(); err != nil {
-		return nil, err
-	}
-	if !n.Enabled() {
-		return fallback, nil
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return &nfsNetwork{native: n, fallback: fallback, dial: dialer.DialContext}, nil
-}
-
-func (n *nfsNetwork) Allows(network string, dst netip.AddrPort) bool {
-	return n.native.Allows(network, dst) || n.fallback.Allows(network, dst)
-}
-
-func (n *nfsNetwork) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	dst, err := netip.ParseAddrPort(address)
-	if err == nil && (network == "tcp" || network == "tcp4") && n.native.Allows("tcp", dst) {
-		return n.dial(ctx, "tcp4", dst.String())
-	}
-	return n.fallback.DialContext(ctx, network, address)
 }

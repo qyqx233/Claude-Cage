@@ -16,7 +16,7 @@ import (
 	"github.com/sylvinus/agent-vm/internal/managedproxy"
 )
 
-func interfaceMonitorServer(t *testing.T) (*Server, *cage.EgressGate) {
+func interfaceMonitorServer(t *testing.T, configure ...func(*cage.Config)) (*Server, *cage.EgressGate) {
 	t.Helper()
 	s := testServer(t)
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -31,6 +31,9 @@ func interfaceMonitorServer(t *testing.T) (*Server, *cage.EgressGate) {
 		t.Fatal(err)
 	}
 	cfg.ProxyURL = p.Endpoint()
+	for _, apply := range configure {
+		apply(&cfg)
+	}
 	if err := writePrivate(s.configPath, cfg); err != nil {
 		t.Fatal(err)
 	}

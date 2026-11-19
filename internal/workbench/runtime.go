@@ -440,7 +440,7 @@ func (s *Server) startEnvironment(syncTimezone bool) error {
 		if gateErr == nil {
 			state, e := client.Status(context.Background())
 			if e == nil {
-				if state.Mode == cage.GateOpen && state.Report != nil && state.Report.Authorizes(state.RunID, cfg.Fingerprint(), time.Now()) == nil {
+				if state.Mode == cage.GateOpen && state.ReportAuthorizes(cfg.Fingerprint(), time.Now()) == nil {
 					s.publishGate(state)
 					return nil
 				}

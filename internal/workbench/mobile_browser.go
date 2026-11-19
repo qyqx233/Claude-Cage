@@ -173,7 +173,7 @@ func (s *Server) phoneSurfaceNetwork(ctx context.Context) bool {
 	gate, err := client.Status(ctx)
 	now := time.Now()
 	return err == nil && gate.Configuration == cfg.Fingerprint() && gate.Mode == cage.GateOpen && gate.PolicyVerified &&
-		!gate.Fault && gate.Until.After(now) && gate.Report != nil && gate.Report.Authorizes(gate.RunID, gate.Configuration, now) == nil
+		!gate.Fault && gate.Until.After(now) && gate.ReportAuthorizes(gate.Configuration, now) == nil
 }
 
 // Caller holds this surface’s operation lock. Closing only this ID lets later opens safely use a

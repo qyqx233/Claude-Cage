@@ -52,11 +52,15 @@ var requiredSafetyChecks = [...]string{
 // Authorizes rejects missing, duplicate, unknown, stale or mismatched evidence.
 // The required IDs are defined here, never supplied by the frontend or a provider.
 func (r SafetyReport) Authorizes(runID, configuration string, now time.Time) error {
+	return r.authorizes(runID, configuration, now, false)
+}
+
+func (r SafetyReport) authorizes(runID, configuration string, now time.Time, allowExpired bool) error {
 	if r.Policy != SafetyPolicyVersion || r.ID == "" || r.CheckID == "" || runID == "" || configuration == "" ||
 		r.RunID != runID || r.Configuration != configuration {
 		return errors.New("检测报告不属于当前环境配置，请重新检测")
 	}
-	if r.CreatedAt.IsZero() || r.CreatedAt.After(now.Add(time.Minute)) || !now.Before(r.CreatedAt.Add(SafetyReportLifetime)) {
+	if r.CreatedAt.IsZero() || r.CreatedAt.After(now.Add(time.Minute)) || (!allowExpired && !now.Before(r.CreatedAt.Add(SafetyReportLifetime))) {
 		return errors.New("检测报告已过期，请重新检测")
 	}
 	seen := make(map[string]SafetyCheck, len(r.Checks))

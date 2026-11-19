@@ -54,6 +54,26 @@ func TestExitProbeTimeoutKeepsExistingLeaseWithoutRenewing(t *testing.T) {
 	}
 }
 
+func TestOptInKeepsSameProxyAfterExitProbeFailure(t *testing.T) {
+	s, gate := interfaceMonitorServer(t, func(cfg *cage.Config) { cfg.KeepProxyOnProbeFailure = true })
+	grantTestGate(t, gate)
+	s.ready = true
+	s.networkPaused = false
+	s.setJobForTest(Job{})
+	s.safety.VerifiedAt = time.Now().Add(-time.Minute)
+	before := gate.Status()
+	verified := s.safety.VerifiedAt
+	s.monitorSafetyWithProbe(func(context.Context, cage.Config) (string, error) { return "", errors.New("connection reset") })
+	held := gate.Status()
+	if held.Mode != cage.GateOpen || !held.HoldingAfterProbeFailure || held.Epoch != before.Epoch || held.Report.ID != before.Report.ID || !s.safety.VerifiedAt.Equal(verified) {
+		t.Fatalf("failed probe disrupted its current grant: before=%+v after=%+v", before, held)
+	}
+	s.monitorSafetyWithProbe(func(context.Context, cage.Config) (string, error) { return "114.114.114.114", nil })
+	if current := gate.Status(); current.Mode != cage.GateClosed || current.HoldingAfterProbeFailure {
+		t.Fatalf("confirmed exit violation accepted: %+v", current)
+	}
+}
+
 func TestWindowsFastPacketReconnectSchedulesFreshCheck(t *testing.T) {
 	for _, tc := range []struct {
 		name, reason          string

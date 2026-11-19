@@ -129,6 +129,40 @@ func TestRenewCannotOutliveItsReport(t *testing.T) {
 	}
 }
 
+func TestProbeHoldCanContinueDuringOutageAndCannotReopenGate(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.KeepProxyOnProbeFailure = true
+	g, err := NewEgressGate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close("test complete") })
+	r := fixtureGrant(t, g)
+	if err := g.HoldAfterProbeFailure("other report"); err == nil {
+		t.Fatal("incorrect grant ID accepted")
+	}
+	if err := g.HoldAfterProbeFailure(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an outage sufficiently long for the initial report to age out.
+	g.mu.Lock()
+	g.state.Report.CreatedAt = time.Now().Add(-SafetyReportLifetime - time.Hour)
+	g.armLocked(time.Second)
+	g.mu.Unlock()
+	previous := g.Status()
+	if err := g.HoldAfterProbeFailure(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	held := g.Status()
+	if !held.HoldingAfterProbeFailure || !held.Until.After(previous.Until) || held.ReportAuthorizes(held.Configuration, time.Now()) != nil || !g.Allows("tcp", netip.MustParseAddrPort("1.1.1.1:443")) {
+		t.Fatalf("active supervision did not preserve the current proxy: %+v", held)
+	}
+	g.Close("manual pause")
+	if g.HoldAfterProbeFailure(r.ID) == nil || g.Status().HoldingAfterProbeFailure {
+		t.Fatal("hold overrode manual pause")
+	}
+}
+
 func TestGateRevokesEstablishedTunnelAndLease(t *testing.T) {
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "CONNECT" || r.Host != "8.8.8.8:443" {

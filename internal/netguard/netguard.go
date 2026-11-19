@@ -205,6 +205,10 @@ func (p *Policy) allows(network string, dst netip.AddrPort, interfaceAddrs func(
 	return ok && time.Now().Before(until)
 }
 
+// OffHost checks that an address is not assigned to this host. Explicit local
+// service grants use it to keep host listeners outside the guest boundary.
+func OffHost(a netip.Addr) bool { return offHost(a.Unmap().WithZone(""), net.InterfaceAddrs) }
+
 // Each new flow needs a current interface list. A public address can become
 // local between connections, and a failed lookup cannot establish isolation.
 func offHost(a netip.Addr, interfaceAddrs func() ([]net.Addr, error)) bool {

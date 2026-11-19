@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,15 +22,17 @@ import (
 const ConfigEnv = "CLAUDE_CAGE_CONFIG"
 
 type Config struct {
-	GuestProfile    *guestprofile.Profile `json:"-"`
-	ProxyURL        string                `json:"proxy_url"`
-	ProxyRevision   string                `json:"proxy_revision,omitempty"`
-	DNSURL          string                `json:"dns_url"`
-	Timezone        string                `json:"timezone"`
-	Locale          string                `json:"locale"`
-	BrowserLanguage string                `json:"browser_language"`
-	ExitPolicy      ExitPolicy            `json:"exit_policy"`
-	NativeNFS       NativeNFS             `json:"native_nfs,omitempty"`
+	GuestProfile            *guestprofile.Profile `json:"-"`
+	ProxyURL                string                `json:"proxy_url"`
+	ProxyRevision           string                `json:"proxy_revision,omitempty"`
+	DNSURL                  string                `json:"dns_url"`
+	Timezone                string                `json:"timezone"`
+	Locale                  string                `json:"locale"`
+	BrowserLanguage         string                `json:"browser_language"`
+	ExitPolicy              ExitPolicy            `json:"exit_policy"`
+	NativeNFS               NativeNFS             `json:"native_nfs,omitempty"`
+	DirectLAN               netip.Prefix          `json:"direct_lan,omitempty,omitzero"`
+	KeepProxyOnProbeFailure bool                  `json:"keep_proxy_on_probe_failure,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -62,6 +65,9 @@ func Load(path string) (Config, error) {
 
 func (c Config) Validate() error {
 	if err := c.NativeNFS.Validate(); err != nil {
+		return err
+	}
+	if err := validateDirectLAN(c.DirectLAN); err != nil {
 		return err
 	}
 	u, err := url.Parse(c.ProxyURL)

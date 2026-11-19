@@ -1180,7 +1180,7 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 		issue = "配置与运行环境不一致，请应用设置并重新检测"
 	}
 	if issue == "" {
-		if err = state.Report.Authorizes(state.RunID, state.Configuration, time.Now()); err != nil {
+		if err = state.ReportAuthorizes(state.Configuration, time.Now()); err != nil {
 			issue = err.Error()
 		}
 	}
@@ -1190,8 +1190,8 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 		ip, err = probe(ctx, cfg)
 		timing.stage("exit_ip")
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil && s.deferTimedOutExitProbe(ctx, client, state) {
-				timing.result = "exit_timeout_retry"
+			if (cfg.KeepProxyOnProbeFailure || errors.Is(err, context.DeadlineExceeded)) && ctx.Err() == nil && s.deferFailedExitProbe(ctx, client, state) {
+				timing.result = "exit_probe_retry"
 				return
 			}
 			issue = "宿主出口采样失败，外网已暂停：" + diagnostics.Redact(usererror.Display("读取宿主出口", err, "请重新检测。").Error())
@@ -1236,9 +1236,9 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 	timing.stage("finish_observation")
 }
 
-// Keep the already granted lease unchanged while retrying a timed-out exit
-// query. The gate's own timer still closes all connections at its deadline.
-func (s *Server) deferTimedOutExitProbe(ctx context.Context, client *cage.GateClient, observed cage.GateStatus) bool {
+// Retry the probe on the current route. A host-owned lease still expires if
+// the monitor stops running or loses contact with the gate.
+func (s *Server) deferFailedExitProbe(ctx context.Context, client *cage.GateClient, observed cage.GateStatus) bool {
 	s.safetyOp.Lock()
 	defer s.safetyOp.Unlock()
 	s.mu.Lock()
@@ -1258,8 +1258,17 @@ func (s *Server) deferTimedOutExitProbe(ctx context.Context, client *cage.GateCl
 	if current.RunID != observed.RunID || current.Epoch != observed.Epoch || current.Mode != cage.GateOpen {
 		return true // A newer transition owns this gate.
 	}
+	message := "出口检测暂时超时，正在重试；现有联网许可未延长"
+	if cfg.KeepProxyOnProbeFailure {
+		held, err := client.HoldAfterProbeFailure(ctx, observed.Report.ID)
+		if err != nil {
+			return false
+		}
+		s.publishGate(held)
+		message = "出口探测失败，正在重试，继续使用当前代理"
+	}
 	s.mu.Lock()
-	s.safety.monitorError = "出口检测暂时超时，正在重试；现有联网许可未延长"
+	s.safety.monitorError = message
 	s.mu.Unlock()
 	return true
 }

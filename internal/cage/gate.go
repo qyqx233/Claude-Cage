@@ -38,21 +38,32 @@ type GateCounters struct {
 }
 
 type GateStatus struct {
-	IPv6LinkProbeCheck string        `json:"ipv6_link_probe_check,omitempty"`
-	Epoch              uint64        `json:"epoch"`
-	PolicyVerified     bool          `json:"policy_verified"`
-	Policy             string        `json:"policy"`
-	RunID              string        `json:"run_id"`
-	CheckID            string        `json:"check_id,omitempty"`
-	CheckStartedAt     time.Time     `json:"check_started_at,omitempty"`
-	Configuration      string        `json:"configuration"`
-	Mode               string        `json:"mode"`
-	Fault              bool          `json:"fault"`
-	Until              time.Time     `json:"until"`
-	Reason             string        `json:"reason,omitempty"`
-	Counters           GateCounters  `json:"counters"`
-	Connections        int           `json:"connections"`
-	Report             *SafetyReport `json:"report,omitempty"`
+	IPv6LinkProbeCheck       string        `json:"ipv6_link_probe_check,omitempty"`
+	Epoch                    uint64        `json:"epoch"`
+	PolicyVerified           bool          `json:"policy_verified"`
+	Policy                   string        `json:"policy"`
+	RunID                    string        `json:"run_id"`
+	CheckID                  string        `json:"check_id,omitempty"`
+	CheckStartedAt           time.Time     `json:"check_started_at,omitempty"`
+	Configuration            string        `json:"configuration"`
+	Mode                     string        `json:"mode"`
+	Fault                    bool          `json:"fault"`
+	Until                    time.Time     `json:"until"`
+	HoldingAfterProbeFailure bool          `json:"holding_after_probe_failure,omitempty"`
+	Reason                   string        `json:"reason,omitempty"`
+	Counters                 GateCounters  `json:"counters"`
+	Connections              int           `json:"connections"`
+	Report                   *SafetyReport `json:"report,omitempty"`
+}
+
+// ReportAuthorizes validates the evidence previously accepted by the gate. Only
+// a live hold can continue using that report during an extended probe outage.
+func (s GateStatus) ReportAuthorizes(configuration string, now time.Time) error {
+	if s.Report == nil {
+		return ErrGateClosed
+	}
+	held := s.HoldingAfterProbeFailure && s.Mode == GateOpen && now.Before(s.Until)
+	return s.Report.authorizes(s.RunID, configuration, now, held)
 }
 
 // EgressGate is owned by the hostagent, not by the guest or browser UI.
@@ -196,6 +207,7 @@ func (g *EgressGate) transitionLocked(mode string, fault bool, reason string) []
 	g.epochContext, g.cancel = context.WithCancel(context.Background())
 	g.state.Mode, g.state.Fault, g.state.Reason = mode, fault, reason
 	g.state.Until = time.Time{}
+	g.state.HoldingAfterProbeFailure = false
 	if mode == GateClosed {
 		g.state.CheckID = ""
 	}
@@ -284,7 +296,24 @@ func (g *EgressGate) Renew(reportID string) error {
 	return nil
 }
 
+// HoldAfterProbeFailure keeps the current proxy route during failed exit
+// probes. The monitor must continue checking to renew the supervision lease.
+// A failed probe cannot open a closed gate or authorize a new configuration.
+func (g *EgressGate) HoldAfterProbeFailure(reportID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.config.KeepProxyOnProbeFailure || g.state.Mode != GateOpen || !g.validLocked(g.epoch) || g.state.Report == nil || g.state.Report.ID != reportID {
+		return ErrGateClosed
+	}
+	// Only Grant installs a report and it validates fresh evidence. This hold
+	// extends the accepted report while the same gate and proxy remain active.
+	g.state.HoldingAfterProbeFailure = true
+	g.armLocked(GateLease)
+	return nil
+}
+
 func (g *EgressGate) armReportLeaseLocked(report SafetyReport) {
+	g.state.HoldingAfterProbeFailure = false
 	until := time.Now().Add(GateLease)
 	if expiry := report.CreatedAt.Add(SafetyReportLifetime); expiry.Before(until) {
 		until = expiry

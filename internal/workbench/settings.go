@@ -183,7 +183,7 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 	if input.ExitPolicy == (cage.ExitPolicy{}) {
 		input.ExitPolicy = old.ExitPolicy
 	}
-	c := cage.Config{ProxyURL: old.ProxyURL, ProxyRevision: old.ProxyRevision, DNSURL: input.DNSURL, Timezone: input.Timezone, Locale: input.Locale, BrowserLanguage: input.BrowserLanguage, ExitPolicy: input.ExitPolicy.Normalized(), NativeNFS: old.NativeNFS}
+	c := cage.Config{ProxyURL: old.ProxyURL, ProxyRevision: old.ProxyRevision, DNSURL: input.DNSURL, Timezone: input.Timezone, Locale: input.Locale, BrowserLanguage: input.BrowserLanguage, ExitPolicy: input.ExitPolicy.Normalized(), NativeNFS: old.NativeNFS, DirectLAN: old.DirectLAN, KeepProxyOnProbeFailure: old.KeepProxyOnProbeFailure}
 	if err := c.Validate(); err != nil {
 		return c, input.Preferences, err
 	}
